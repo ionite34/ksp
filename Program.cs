@@ -181,7 +181,7 @@ namespace ksp
             {
                 await Task.Delay(500);
             }
-            
+
             // Cut drogues
             foreach (var drogue in drogues)
             {
@@ -191,7 +191,7 @@ namespace ksp
             }
         }
         
-        public void Launch()
+        public async Task Launch()
         {
             var ascent = Mechjeb.AscentAutopilot;
 
@@ -208,97 +208,20 @@ namespace ksp
             var ui = Connection.UI();
             foreach (var i in Enumerable.Range(1, 5))
             {
-                // ui.Message($"Launching in {5 - i} seconds");
-                Thread.Sleep(1000);
+                ui.Message($"Launching in {5 - i} seconds");
+                await Task.Delay(1000);
             }
 
             LaunchConfig();
 
             vessel.Control.ActivateNextStage();
+            
+            await Connection.WaitFor(() => ascent.Enabled, false);
 
-            var enabledStream = Connection.AddStream(() => ascent.Enabled);
-            while (enabledStream.Get())
-            {
-                Thread.Sleep(1000);
-            }
-                
             Console.WriteLine("Launch complete, thanks Jeb");
         }
     }
 
-    internal class UIPanel: IDisposable
-    {
-        private Connection connection;
-        private Canvas canvas;
-        private Panel panel;
-        private CancellationTokenSource cancelToken;
-        
-        public UIPanel(Connection connection)
-        {
-            this.connection = connection;
-            canvas = connection.UI().StockCanvas;
-            panel = canvas.AddPanel();
-            cancelToken = new CancellationTokenSource();
-            
-            Console.CancelKeyPress += (sender, eventArgs) =>
-            {
-                cancelToken.Cancel();
-            };
-        }
-
-        public void Dispose()
-        {
-            Console.WriteLine("Running UIPanel Dispose");
-            cancelToken.Cancel();
-            panel.Remove();
-        }
-        
-        public Task MakeUI()
-        {
-            // Get the size of the game window in pixels
-            var screenSize = canvas.RectTransform.Size;
-
-            // Position the panel on the left of the screen
-            var rect = panel.RectTransform;
-            rect.Size = Tuple.Create(200.0, 100.0);
-            rect.Position = Tuple.Create((110 - (screenSize.Item1) / 2), 0.0);
-
-            // Add a button to set the throttle to maximum
-            var button = panel.AddButton("Full Throttle");
-            button.RectTransform.Position = Tuple.Create(0.0, 20.0);
-
-            // Add some text displaying the total engine thrust
-            var text = panel.AddText("Thrust: 0 kN");
-            text.RectTransform.Position = Tuple.Create(0.0, -20.0);
-            text.Color = Tuple.Create(1.0, 1.0, 1.0);
-            text.Size = 18;
-
-            // Set up a stream to monitor the throttle button
-            var buttonClicked = connection.AddStream(() => button.Clicked);
-
-            var vessel = connection.SpaceCenter().ActiveVessel;
-            var res = Task.Run(async () =>
-            {
-                while (!cancelToken.IsCancellationRequested)
-                {
-                    // Handle the throttle button being clicked
-                    if (buttonClicked.Get())
-                    {
-                        vessel.Control.Throttle = 1;
-                        button.Clicked = false;
-                    }
-
-                    // Update the thrust text
-                    text.Content = "Thrust: " + (vessel.Thrust / 1000) + " kN";
-
-                    await Task.Delay(1000, cancelToken.Token);
-                }
-            }, cancelToken.Token);
-
-            return res;
-        }
-    }
-    
     internal class Program
     {
         public static void Main(string[] args)
@@ -308,6 +231,10 @@ namespace ksp
 
         private async Task MainAsync()
         {
+            // Prompt
+            Console.WriteLine("Press any key to connect to KSP");
+            Console.ReadKey();
+            
             using (var flight = new Flight())
             {
                 var logger = LogManager.GetCurrentClassLogger();
@@ -316,11 +243,10 @@ namespace ksp
                 
                 var names = flight.Vessel.Parts.All.Select(p => p.Name);
                 logger.Debug($"Parts: {string.Join(", ", names)}");
-
-                var pod = flight.Vessel.Parts.Controlling;
-                logger.Info($"Controlling modules: {pod.Name}#{pod.id}");
-                var podMods = pod.Modules.Select(m => m.Name);
-                logger.Info($"{string.Join(", ", podMods)}");
+                
+                var box = new UIPanel(flight.Connection);
+                box.AddButton("Cancel", () => Environment.Exit(0));
+                box.Visible = true;
                 
                 // Detect abort
                 var vessel = flight.Vessel;

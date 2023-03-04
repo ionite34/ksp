@@ -64,9 +64,11 @@
         <Reference Include="System.Xml" />
     </ItemGroup>
     <ItemGroup>
+        <Compile Include="Extensions.cs" />
         <Compile Include="MechJeb.cs" />
         <Compile Include="Program.cs" />
         <Compile Include="Properties\AssemblyInfo.cs" />
+        <Compile Include="UIPanel.cs" />
     </ItemGroup>
     <ItemGroup>
       <None Include="NLog.config">
