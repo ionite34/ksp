@@ -9,6 +9,8 @@ using KRPC.Client.Services.MechJeb;
 using KRPC.Client.Services.SpaceCenter;
 using KRPC.Client.Services.UI;
 using NLog;
+using NLog.Fluent;
+using ArgumentOutOfRangeException = System.ArgumentOutOfRangeException;
 using Service = KRPC.Client.Services.MechJeb.Service;
 
 namespace ksp
@@ -220,6 +222,92 @@ namespace ksp
 
             Console.WriteLine("Launch complete, thanks Jeb");
         }
+        
+        private string FormatDirections(Tuple<double, double, double> current, Tuple<double, double, double> target)
+        {
+            // Format the directions with 2 decimal places, and with delta
+            var deltaX = Math.Abs(target.Item1 - current.Item1);
+            var deltaY = Math.Abs(target.Item2 - current.Item2);
+            var deltaZ = Math.Abs(target.Item3 - current.Item3);
+            return $"Current ({current.Item1:0.00}, {current.Item2:0.00}, {current.Item3:0.00})\n" +
+                   $"Target  ({target.Item1:0.00}, {target.Item2:0.00}, {target.Item3:0.00})\n" +
+                   $"Delta   ({deltaX:0.00}, {deltaY:0.00}, {deltaZ:0.00})";
+        }
+
+        public async Task BoosterLanding()
+        {
+            // Activate speed brakes
+            Vessel.Control.Brakes = true;
+            
+            // Flip back to KSC
+            Logger.Info($"Beginning flip back");
+            Vessel.Control.RCS = true;
+
+            var ap = Vessel.AutoPilot;
+            var referenceFrame = Vessel.SurfaceVelocityReferenceFrame;
+            ap.ReferenceFrame = referenceFrame;
+            ap.TargetDirection = Tuple.Create(0.0, -1.0, 0.0); // Retrograde
+
+            Vessel.Control.SpeedMode = SpeedMode.Surface;
+            ap.SAS = true;
+            ap.SASMode = SASMode.StabilityAssist;
+            await Task.Delay(50);
+            ap.SASMode = SASMode.Retrograde;
+
+            // Mechjeb.SmartASS.AutopilotMode = SmartASSAutopilotMode.Retrograde;
+            // Mechjeb.SmartRCS.RCSController.RCSForRotation = true;
+
+            await Task.Delay(500);
+            
+            var tolerance = (0.1, 0.05, 0.1);
+            
+            // For 3 seconds, burst some throttle to help with vectoring
+            // Stop early if our direction is good
+            Logger.Info("Throttle for vectoring");
+            for (var i = 0; i < 3; i++)
+            {
+                if (Vessel.InDirection(referenceFrame, ap.TargetDirection, tolerance.ToTuple()))
+                    break;
+                Vessel.Control.Throttle = 0.7f;
+                await Task.Delay(100);
+                Vessel.Control.Throttle = 0.5f;
+                await Task.Delay(150);
+                Vessel.Control.Throttle = 0;
+                await Task.Delay(500);
+            }
+            
+            Logger.Info("Waiting for retrograde...");
+            for (var i = 0; i < 20; i++)
+            {
+                if (Vessel.InDirection(referenceFrame, ap.TargetDirection, tolerance.ToTuple()))
+                    break;
+                var current = Vessel.Direction(referenceFrame);
+                var target = ap.TargetDirection;
+                Console.WriteLine(FormatDirections(current, target));
+                Vessel.Control.Throttle = 0.3f;
+                await Task.Delay(125);
+                Vessel.Control.Throttle = 0;
+                await Task.Delay(500);
+
+                // Take a break
+                if (i == 10)
+                    await Task.Delay(1000);
+            }
+
+            await Vessel.WaitForDirection(referenceFrame, ap.TargetDirection, tolerance.ToTuple());
+            Logger.Info("-> [Finished retrograde]");
+            
+            // Burn until minimum delta v (1000)
+            const int targetDeltaV = 1000;
+            Logger.Info($"Burn until minimum delta v {targetDeltaV} (current: {Vessel.DeltaV()})");
+            while (Vessel.DeltaV() > targetDeltaV)
+            {
+                Vessel.Control.Throttle = 1;
+                await Task.Delay(100);
+            }
+
+            Logger.Info("Finished booster landing.");
+        }
     }
 
     internal class Program
@@ -227,6 +315,31 @@ namespace ksp
         public static void Main(string[] args)
         {
             new Program().MainAsync().GetAwaiter().GetResult();
+        }
+
+        private static async Task StartMenu(Flight flight)
+        {
+            while (true)
+            {
+                Console.WriteLine("Options");
+                Console.WriteLine("1. Launch");
+                Console.WriteLine("2. Booster Landing");
+                Console.WriteLine("Q. Quit");
+
+                var key = Console.ReadKey();
+                
+                switch (key.Key)
+                {
+                    case ConsoleKey.D1:
+                        await flight.Launch();
+                        break;
+                    case ConsoleKey.D2:
+                        await flight.BoosterLanding();
+                        break;
+                    default:
+                        return;
+                }
+            }
         }
 
         private async Task MainAsync()
@@ -244,38 +357,7 @@ namespace ksp
                 var names = flight.Vessel.Parts.All.Select(p => p.Name);
                 logger.Debug($"Parts: {string.Join(", ", names)}");
                 
-                var box = new UIPanel(flight.Connection);
-                box.AddButton("Cancel", () => Environment.Exit(0));
-                box.Visible = true;
-                
-                // Detect abort
-                var vessel = flight.Vessel;
-                var stream = flight.Connection.AddStream(() => vessel.Control.Abort);
-
-                stream.AddCallback((x) =>
-                {
-                    Console.WriteLine($"Abort called {x}");
-                    if (x)
-                    {
-                        flight.ActivateLaunchEscape().Wait();
-                    }
-                });
-
-                logger.Info("Starting Get");
-                stream.Get();
-
-                var ui = flight.Connection.UI();
-                foreach (var i in Enumerable.Range(1, 65))
-                {
-                    // ui.Message($"LES Test in {15 - i} seconds");
-                    logger.Info($"LES Test in {65 - i} seconds");
-                    await Task.Delay(1000);
-                }
-                
-                // flight.ArmLaunchEscape();
-                // await flight.ActivateLaunchEscape();
-
-                // flight.Launch();
+                await StartMenu(flight);
             }
         }
     }

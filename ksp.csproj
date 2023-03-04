@@ -69,6 +69,7 @@
         <Compile Include="Program.cs" />
         <Compile Include="Properties\AssemblyInfo.cs" />
         <Compile Include="UIPanel.cs" />
+        <Compile Include="VesselExt.cs" />
     </ItemGroup>
     <ItemGroup>
       <None Include="NLog.config">

@@ -1,8 +1,5 @@
 ﻿using System;
-using System.Threading;
-using System.Threading.Tasks;
 using KRPC.Client;
-using KRPC.Client.Services.SpaceCenter;
 using KRPC.Client.Services.UI;
 using NLog;
 
@@ -56,11 +53,10 @@ namespace ksp
             var buttonClicked = connection.AddStream(() => button.Clicked);
             buttonClicked.AddCallback(x =>
             {
-                if (x)
-                {
-                    callback();
-                    button.Clicked = false;
-                }
+                if (!x) return;
+                Logger.Info($"Button {name} callback triggered");
+                callback();
+                button.Clicked = false;
             });
         }
         
