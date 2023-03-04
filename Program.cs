@@ -305,6 +305,7 @@ namespace ksp
                 Vessel.Control.Throttle = 1;
                 await Task.Delay(100);
             }
+            Vessel.Control.Throttle = 0;
 
             Logger.Info("Finished booster landing.");
         }
