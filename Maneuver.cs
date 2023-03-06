@@ -102,43 +102,58 @@ namespace ksp
 
             // Controller
             // var pid = new PID(0.25, 0.025, 0.0025, 200, _throttleMax, _throttleMin);
-            var pid = new PID(0.45, 0.025, 0.0025, 1, 1, 0);
+            var pid = new PID(0.25, 0.025, 0.0025, 1, 1, 0);
             var samplePeriod = TimeSpan.FromMilliseconds(10);
-            var timer = new Stopwatch();
-            timer.Start();
+            var pidTimer = new Stopwatch();
+            pidTimer.Start();
+            var iterTimer = new Stopwatch();
 
             // Do Burn
             var vesselControl = _connection.SpaceCenter().ActiveVessel.Control;
+            var lastThrottle = 0f;
             try
             {
                 var iters = 0;
                 while (!_ctsToken.IsCancellationRequested)
                 {
+                    var logCycle = iters % 100 <= 1;
+                    iterTimer.Restart();
                     // When the expression is true, stop immediately
                     if (compiledFunc()) break;
                     var streamValue = Convert.ToSingle(stream.Get());
 
                     // Calculate throttle with PID
                     // ts is fixed to samplePeriod if this is the first iteration
-                    var ts = iters == 0 ? samplePeriod : timer.Elapsed;
+                    var ts = iters == 0 ? samplePeriod : pidTimer.Elapsed;
                     
-                    if (iters % 100 == 0)
-                    {
-                        Logger.Debug($"Iter[{iters}] ElapsedTS: {ts.Milliseconds:0.0}ms");
-                    }
+                    if (logCycle) Logger.Debug($"Iter[{iters}] ElapsedTS: {ts.TotalMilliseconds:0.0}ms");
 
-                    var throttle = pid.PID_iterate(target, streamValue, ts);
+                    var throttle = Convert.ToSingle(pid.PID_iterate(target, streamValue, ts));
+                    pidTimer.Restart();
                     
-                    if (iters % 100 == 0)
+                    if (logCycle)
                     {
                         Logger.Debug($"-> PID out: {throttle:0.0000} | Target: {target:0.0000} | Current: {streamValue:0.0000}");
+                        Logger.Debug($"-> Setting throttle, time in cycle: {iterTimer.Elapsed.TotalMilliseconds:0.0}ms");
                     }
-                    
-                    timer.Restart();
 
-                    vesselControl.Throttle = Convert.ToSingle(throttle);
-                    
-                    await Task.Delay(samplePeriod, _ctsToken);
+                    // Skip throttle if it's within 5% of last
+                    if (Math.Abs(throttle - lastThrottle) > 0.05)
+                    {
+                        vesselControl.Throttle = throttle;
+                        lastThrottle = throttle;   
+                    }
+
+                    var timeToWait = samplePeriod - iterTimer.Elapsed;
+                    if (logCycle)
+                    {
+                        Logger.Debug($"-> Calling task delay now, time in cycle: {iterTimer.Elapsed.TotalMilliseconds:0.0}ms");
+                        Logger.Debug($"-> Delaying for {timeToWait.TotalMilliseconds:0.0}ms");
+                    }
+                    if (timeToWait > TimeSpan.Zero)
+                    {
+                        await Task.Delay(timeToWait, _ctsToken);
+                    }
                     iters += 1;
                 }
             }
