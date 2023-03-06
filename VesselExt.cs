@@ -32,17 +32,16 @@ namespace ksp
                    Math.Abs(direction.Item3 - z) < tolerance.Item3;
         }
         
-        public static double DeltaV(this Vessel vessel)
+        public static double DeltaV(this Vessel vessel, bool onlyActiveEngines = false)
         {
             var gravity = vessel.Orbit.Body.SurfaceGravity;
             var totalMass = vessel.Mass;
             var dryMass = vessel.DryMass;
             
             // Using DeltaV = Isp * g * ln(m0 / m1)
-            var stage = vessel.Control.CurrentStage;
             var engines = vessel.Parts.Engines;
             var totalIsp = engines
-               .Where(engine => engine.Active && engine.Part.Stage == stage)
+               .Where(engine => !onlyActiveEngines || engine.Active)
                .Sum(engine => engine.SpecificImpulse);
             
             return totalIsp * gravity * Math.Log(totalMass / dryMass);

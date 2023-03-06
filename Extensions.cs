@@ -9,11 +9,11 @@ namespace ksp
 {
     public static class Extensions
     {
-        public static T WaitFor<T>(this Stream<T> stream, Func<T, bool> condition)
+        public static T WaitFor<T>(this Stream<T> stream, Func<T, bool> condition, CancellationToken cancellationToken = default)
         {
-            lock (stream.Condition)
+            while (!cancellationToken.IsCancellationRequested)
             {
-                while (true)
+                lock (stream.Condition)
                 {
                     var value = stream.Get();
                     if (condition(value))
@@ -21,20 +21,21 @@ namespace ksp
                         stream.Remove();
                         return value;
                     }
-                    stream.Wait();
+                    stream.Wait(100);
                 }
             }
+            throw new TaskCanceledException();
         }
 
-        public static async Task WaitFor<T>(this Connection connection, Expression<Func<T>> expression, Func<T, bool> condition)
+        public static async Task WaitFor<T>(this Connection connection, Expression<Func<T>> expression, Func<T, bool> condition, CancellationToken token = default)
         {
             var stream = connection.AddStream(expression);
-            await Task.Run(() => stream.WaitFor(condition));
+            await Task.Run(() => stream.WaitFor(condition), token);
         }
         
-        public static async Task WaitFor<T>(this Connection connection, Expression<Func<T>> expression, T value) where T: IEquatable<T>
+        public static async Task WaitFor<T>(this Connection connection, Expression<Func<T>> expression, T value, CancellationToken token = default) where T: IEquatable<T>
         {
-            await WaitFor(connection, expression, m => m.Equals(value));
+            await WaitFor(connection, expression, m => m.Equals(value), token);
         }
     }
     
